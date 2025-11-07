@@ -27,7 +27,9 @@ const Detect = () => {
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 640, height: 480 } 
+        video: { 
+          facingMode: "user"
+        } 
       });
       
       if (videoRef.current) {
@@ -59,14 +61,34 @@ const Detect = () => {
         }
       }, 200);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Camera error:", error);
       setCameraPermission("denied");
-      addLog("Camera access denied");
+      
+      let errorTitle = "Camera Error";
+      let errorDescription = "Unable to access camera";
+      
+      if (error.name === "NotFoundError") {
+        errorTitle = "No Camera Found";
+        errorDescription = "No camera detected. Please connect a camera or check if it's being used by another app.";
+        addLog("No camera device found");
+      } else if (error.name === "NotAllowedError") {
+        errorTitle = "Camera Access Denied";
+        errorDescription = "Please allow camera access in your browser settings and refresh the page.";
+        addLog("Camera permission denied");
+      } else if (error.name === "NotReadableError") {
+        errorTitle = "Camera In Use";
+        errorDescription = "Camera is already in use by another application.";
+        addLog("Camera in use by another app");
+      } else {
+        addLog(`Camera error: ${error.message}`);
+      }
+      
       toast({
         variant: "destructive",
-        title: "Camera Access Denied",
-        description: "Please allow camera access to use detection",
+        title: errorTitle,
+        description: errorDescription,
+        duration: 8000,
       });
     }
   };
