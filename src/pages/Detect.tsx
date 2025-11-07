@@ -4,6 +4,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Camera, CameraOff, RotateCcw, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
 
 const Detect = () => {
   const [isDetecting, setIsDetecting] = useState(false);
@@ -15,6 +16,9 @@ const Detect = () => {
   const [baselineProgress, setBaselineProgress] = useState(0);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+  const [isDemo, setIsDemo] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const { toast } = useToast();
@@ -24,18 +28,62 @@ const Detect = () => {
     setLogs(prev => [`[${timestamp}] ${message}`, ...prev].slice(0, 10));
   };
 
+  const refreshDevices = async () => {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const cams = all.filter(d => d.kind === 'videoinput');
+      setDevices(cams);
+    } catch (e) {
+      console.error('enumerateDevices error', e);
+    }
+  };
+
+  const startDemo = () => {
+    setIsDemo(true);
+    setIsDetecting(true);
+    addLog('Starting demo mode');
+    setIsCalibrating(true);
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress += 10;
+      setBaselineProgress(progress);
+      if (progress >= 100) {
+        clearInterval(interval);
+        setIsCalibrating(false);
+        addLog('Baseline calibration complete (demo)');
+        toast({ title: 'Calibration Complete', description: 'Demo detection is now active' });
+        startSimulatedDetection();
+      }
+    }, 200);
+  };
+
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { 
-          facingMode: "user"
-        } 
-      });
+      if (!devices.length) {
+        await refreshDevices();
+      }
+
+      const constraints: MediaStreamConstraints = selectedDeviceId
+        ? { video: { deviceId: { exact: selectedDeviceId } } }
+        : { video: { facingMode: "user" } };
+
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err: any) {
+        if (err.name === "NotFoundError") {
+          // Fallback: try generic constraint
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        } else {
+          throw err;
+        }
+      }
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
       
+      setIsDemo(false);
       setCameraPermission("granted");
       setIsDetecting(true);
       addLog("Camera started successfully");
@@ -70,7 +118,7 @@ const Detect = () => {
       
       if (error.name === "NotFoundError") {
         errorTitle = "No Camera Found";
-        errorDescription = "No camera detected. Please connect a camera or check if it's being used by another app.";
+        errorDescription = "No camera detected. Try refreshing devices, opening fullscreen (outside iframe), or connect a camera.";
         addLog("No camera device found");
       } else if (error.name === "NotAllowedError") {
         errorTitle = "Camera Access Denied";
@@ -99,6 +147,7 @@ const Detect = () => {
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
+    setIsDemo(false);
     setIsDetecting(false);
     addLog("Detection stopped");
   };
@@ -173,6 +222,11 @@ const Detect = () => {
   };
 
   useEffect(() => {
+    refreshDevices();
+    // Some browsers require enumerateDevices before prompting permissions
+  }, []);
+
+  useEffect(() => {
     return () => {
       stopCamera();
     };
@@ -193,23 +247,41 @@ const Detect = () => {
           <div className="lg:col-span-2 space-y-4">
             <div className="relative aspect-video bg-card rounded-xl border-2 border-primary/30 overflow-hidden shadow-[0_0_30px_hsl(var(--primary)/0.3)]">
               {!isDetecting ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-4 text-center">
                   <Camera className="w-16 h-16 text-muted-foreground" />
                   <p className="text-muted-foreground">Camera not active</p>
-                  <Button onClick={startCamera} size="lg" className="gap-2">
-                    <Camera className="w-5 h-5" />
-                    Start Camera
-                  </Button>
+                  <div className="flex flex-wrap gap-3 justify-center">
+                    <Button onClick={startCamera} size="lg" className="gap-2">
+                      <Camera className="w-5 h-5" />
+                      Start Camera
+                    </Button>
+                    <Button onClick={startDemo} variant="secondary" size="lg">Use Demo Video</Button>
+                    <Button onClick={() => window.open(window.location.href, '_blank')} variant="outline" size="lg">Open Fullscreen</Button>
+                  </div>
+                  {devices.length === 0 && (
+                    <p className="text-xs text-muted-foreground">No cameras detected. Check OS/browser permissions or connect a camera.</p>
+                  )}
                 </div>
               ) : (
                 <>
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                  />
+                  {isDemo ? (
+                    <video
+                      src="/assets/sample_videos/flower.mp4"
+                      autoPlay
+                      playsInline
+                      muted
+                      loop
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-full object-cover"
+                    />
+                  )}
                   
                   {/* Overlays */}
                   <div className="absolute top-4 left-4">
@@ -241,7 +313,22 @@ const Detect = () => {
             </div>
 
             {/* Controls */}
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3 items-center">
+              <div className="flex items-center gap-2">
+                <Select value={selectedDeviceId} onValueChange={(v) => setSelectedDeviceId(v)}>
+                  <SelectTrigger className="w-[220px]">
+                    <SelectValue placeholder={devices.length ? 'Select camera' : 'No cameras found'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {devices.map((d) => (
+                      <SelectItem key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${d.deviceId.slice(0,4)}`}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" onClick={refreshDevices}>Refresh</Button>
+                <Button variant="outline" onClick={() => window.open(window.location.href, '_blank')}>Open Fullscreen</Button>
+              </div>
+
               {isDetecting ? (
                 <>
                   <Button onClick={stopCamera} variant="destructive" className="gap-2">
@@ -253,7 +340,15 @@ const Detect = () => {
                     Recalibrate
                   </Button>
                 </>
-              ) : null}
+              ) : (
+                <>
+                  <Button onClick={startCamera} className="gap-2">
+                    <Camera className="w-4 h-4" />
+                    Start Camera
+                  </Button>
+                  <Button onClick={startDemo} variant="secondary">Try Demo Video</Button>
+                </>
+              )}
             </div>
           </div>
 
