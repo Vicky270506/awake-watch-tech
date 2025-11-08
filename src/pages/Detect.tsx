@@ -4,8 +4,6 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Camera, CameraOff, RotateCcw, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
-import { EyeDetector } from "@/lib/eyeDetector";
 
 const Detect = () => {
   const [isDetecting, setIsDetecting] = useState(false);
@@ -17,13 +15,8 @@ const Detect = () => {
   const [baselineProgress, setBaselineProgress] = useState(0);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
-  const [isDemo, setIsDemo] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
-  const detectorRef = useRef<EyeDetector | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
   const { toast } = useToast();
 
   const addLog = (message: string) => {
@@ -31,108 +24,49 @@ const Detect = () => {
     setLogs(prev => [`[${timestamp}] ${message}`, ...prev].slice(0, 10));
   };
 
-  const refreshDevices = async () => {
-    try {
-      const all = await navigator.mediaDevices.enumerateDevices();
-      const cams = all.filter(d => d.kind === 'videoinput');
-      setDevices(cams);
-    } catch (e) {
-      console.error('enumerateDevices error', e);
-    }
-  };
-
-  const startDemo = () => {
-    setIsDemo(true);
-    setIsDetecting(true);
-    addLog('Starting demo mode');
-    setIsCalibrating(true);
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 10;
-      setBaselineProgress(progress);
-      if (progress >= 100) {
-        clearInterval(interval);
-        setIsCalibrating(false);
-        addLog('Baseline calibration complete (demo)');
-        toast({ title: 'Calibration Complete', description: 'Demo detection is now active' });
-        startSimulatedDetection();
-      }
-    }, 200);
-  };
-
   const startCamera = async () => {
     try {
-      if (!devices.length) {
-        await refreshDevices();
-      }
-
-      const constraints: MediaStreamConstraints = selectedDeviceId
-        ? { video: { deviceId: { exact: selectedDeviceId } } }
-        : { video: { facingMode: "user" } };
-
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (err: any) {
-        if (err.name === "NotFoundError") {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        } else {
-          throw err;
-        }
-      }
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 640, height: 480 } 
+      });
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
       
-      setIsDemo(false);
       setCameraPermission("granted");
       setIsDetecting(true);
       addLog("Camera started successfully");
       
-      // Initialize detector
-      if (!detectorRef.current) {
-        addLog("Initializing MediaPipe Face Landmarker...");
-        detectorRef.current = new EyeDetector();
-        await detectorRef.current.initialize();
-        addLog("MediaPipe initialized");
-      }
-      
-      // Start calibration
+      // Simulate baseline calibration
       setIsCalibrating(true);
-      detectorRef.current.startCalibration();
-      addLog("Starting baseline calibration...");
+      let progress = 0;
+      const interval = setInterval(() => {
+        progress += 10;
+        setBaselineProgress(progress);
+        
+        if (progress >= 100) {
+          clearInterval(interval);
+          setIsCalibrating(false);
+          addLog("Baseline calibration complete");
+          toast({
+            title: "Calibration Complete",
+            description: "Detection is now active",
+          });
+          
+          // Start simulated detection
+          startSimulatedDetection();
+        }
+      }, 200);
       
-      startRealDetection();
-      
-    } catch (error: any) {
+    } catch (error) {
       console.error("Camera error:", error);
       setCameraPermission("denied");
-      
-      let errorTitle = "Camera Error";
-      let errorDescription = "Unable to access camera";
-      
-      if (error.name === "NotFoundError") {
-        errorTitle = "No Camera Found";
-        errorDescription = "No camera detected. Try refreshing devices, opening fullscreen (outside iframe), or connect a camera.";
-        addLog("No camera device found");
-      } else if (error.name === "NotAllowedError") {
-        errorTitle = "Camera Access Denied";
-        errorDescription = "Please allow camera access in your browser settings and refresh the page.";
-        addLog("Camera permission denied");
-      } else if (error.name === "NotReadableError") {
-        errorTitle = "Camera In Use";
-        errorDescription = "Camera is already in use by another application.";
-        addLog("Camera in use by another app");
-      } else {
-        addLog(`Camera error: ${error.message}`);
-      }
-      
+      addLog("Camera access denied");
       toast({
         variant: "destructive",
-        title: errorTitle,
-        description: errorDescription,
-        duration: 8000,
+        title: "Camera Access Denied",
+        description: "Please allow camera access to use detection",
       });
     }
   };
@@ -143,79 +77,51 @@ const Detect = () => {
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-    setIsDemo(false);
     setIsDetecting(false);
     addLog("Detection stopped");
   };
 
   const recalibrate = () => {
-    if (detectorRef.current) {
-      setIsCalibrating(true);
-      setBaselineProgress(0);
-      detectorRef.current.startCalibration();
-      addLog("Recalibration started");
-    }
-  };
-
-  // Real detection using MediaPipe
-  const startRealDetection = () => {
-    const detect = () => {
-      if (!videoRef.current || !detectorRef.current || !isDetecting) {
-        return;
+    setIsCalibrating(true);
+    setBaselineProgress(0);
+    addLog("Recalibration started");
+    
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress += 10;
+      setBaselineProgress(progress);
+      
+      if (progress >= 100) {
+        clearInterval(interval);
+        setIsCalibrating(false);
+        addLog("Recalibration complete");
+        toast({
+          title: "Recalibration Complete",
+          description: "New baseline established",
+        });
       }
-
-      const timestamp = performance.now();
-      const result = detectorRef.current.processFrame(videoRef.current, timestamp);
-
-      if (result) {
-        setEyeOpenness(result.eye);
-        setEyeState(result.state);
-        setClosedFor(result.closed_for);
-
-        // Update calibration progress
-        if (detectorRef.current.isCalibrationInProgress()) {
-          const progress = detectorRef.current.getCalibrationProgress();
-          setBaselineProgress(progress);
-          
-          if (progress >= 100) {
-            setIsCalibrating(false);
-            addLog("Baseline calibration complete");
-            toast({
-              title: "Calibration Complete",
-              description: "Real-time detection is now active",
-            });
-          }
-        }
-
-        // Trigger alarm
-        if (result.alarm && !isAlarmActive) {
-          triggerAlarm();
-        }
-      }
-
-      animationFrameRef.current = requestAnimationFrame(detect);
-    };
-
-    detect();
+    }, 200);
   };
 
   // Simulated detection for demo purposes
   const startSimulatedDetection = () => {
     setInterval(() => {
+      // Simulate eye openness fluctuation
       const random = Math.random();
       const newOpenness = 0.02 + (random * 0.05);
       setEyeOpenness(newOpenness);
       
+      // Simulate occasional closed states
       if (random < 0.15) {
         setEyeState("CLOSED");
         setClosedFor(prev => {
           const newValue = prev + 0.1;
+          
+          // Trigger alarm at 1.2 seconds
           if (newValue >= 1.2 && !isAlarmActive) {
             triggerAlarm();
           }
+          
           return newValue;
         });
       } else {
@@ -245,11 +151,6 @@ const Detect = () => {
   };
 
   useEffect(() => {
-    refreshDevices();
-    // Some browsers require enumerateDevices before prompting permissions
-  }, []);
-
-  useEffect(() => {
     return () => {
       stopCamera();
     };
@@ -270,41 +171,23 @@ const Detect = () => {
           <div className="lg:col-span-2 space-y-4">
             <div className="relative aspect-video bg-card rounded-xl border-2 border-primary/30 overflow-hidden shadow-[0_0_30px_hsl(var(--primary)/0.3)]">
               {!isDetecting ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-4 text-center">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
                   <Camera className="w-16 h-16 text-muted-foreground" />
                   <p className="text-muted-foreground">Camera not active</p>
-                  <div className="flex flex-wrap gap-3 justify-center">
-                    <Button onClick={startCamera} size="lg" className="gap-2">
-                      <Camera className="w-5 h-5" />
-                      Start Camera
-                    </Button>
-                    <Button onClick={startDemo} variant="secondary" size="lg">Use Demo Video</Button>
-                    <Button onClick={() => window.open(window.location.href, '_blank')} variant="outline" size="lg">Open Fullscreen</Button>
-                  </div>
-                  {devices.length === 0 && (
-                    <p className="text-xs text-muted-foreground">No cameras detected. Check OS/browser permissions or connect a camera.</p>
-                  )}
+                  <Button onClick={startCamera} size="lg" className="gap-2">
+                    <Camera className="w-5 h-5" />
+                    Start Camera
+                  </Button>
                 </div>
               ) : (
                 <>
-                  {isDemo ? (
-                    <video
-                      src="/assets/sample_videos/flower.mp4"
-                      autoPlay
-                      playsInline
-                      muted
-                      loop
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                    />
-                  )}
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
                   
                   {/* Overlays */}
                   <div className="absolute top-4 left-4">
@@ -336,22 +219,7 @@ const Detect = () => {
             </div>
 
             {/* Controls */}
-            <div className="flex flex-wrap gap-3 items-center">
-              <div className="flex items-center gap-2">
-                <Select value={selectedDeviceId} onValueChange={(v) => setSelectedDeviceId(v)}>
-                  <SelectTrigger className="w-[220px]">
-                    <SelectValue placeholder={devices.length ? 'Select camera' : 'No cameras found'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {devices.map((d) => (
-                      <SelectItem key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${d.deviceId.slice(0,4)}`}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button variant="outline" onClick={refreshDevices}>Refresh</Button>
-                <Button variant="outline" onClick={() => window.open(window.location.href, '_blank')}>Open Fullscreen</Button>
-              </div>
-
+            <div className="flex gap-3">
               {isDetecting ? (
                 <>
                   <Button onClick={stopCamera} variant="destructive" className="gap-2">
@@ -363,15 +231,7 @@ const Detect = () => {
                     Recalibrate
                   </Button>
                 </>
-              ) : (
-                <>
-                  <Button onClick={startCamera} className="gap-2">
-                    <Camera className="w-4 h-4" />
-                    Start Camera
-                  </Button>
-                  <Button onClick={startDemo} variant="secondary">Try Demo Video</Button>
-                </>
-              )}
+              ) : null}
             </div>
           </div>
 
