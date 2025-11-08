@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Camera, CameraOff, RotateCcw, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
+import { EyeDetector } from "@/lib/eyeDetector";
 
 const Detect = () => {
   const [isDetecting, setIsDetecting] = useState(false);
@@ -21,6 +22,8 @@ const Detect = () => {
   const [isDemo, setIsDemo] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
+  const detectorRef = useRef<EyeDetector | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const { toast } = useToast();
 
   const addLog = (message: string) => {
@@ -72,7 +75,6 @@ const Detect = () => {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
       } catch (err: any) {
         if (err.name === "NotFoundError") {
-          // Fallback: try generic constraint
           stream = await navigator.mediaDevices.getUserMedia({ video: true });
         } else {
           throw err;
@@ -88,26 +90,20 @@ const Detect = () => {
       setIsDetecting(true);
       addLog("Camera started successfully");
       
-      // Simulate baseline calibration
+      // Initialize detector
+      if (!detectorRef.current) {
+        addLog("Initializing MediaPipe Face Landmarker...");
+        detectorRef.current = new EyeDetector();
+        await detectorRef.current.initialize();
+        addLog("MediaPipe initialized");
+      }
+      
+      // Start calibration
       setIsCalibrating(true);
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += 10;
-        setBaselineProgress(progress);
-        
-        if (progress >= 100) {
-          clearInterval(interval);
-          setIsCalibrating(false);
-          addLog("Baseline calibration complete");
-          toast({
-            title: "Calibration Complete",
-            description: "Detection is now active",
-          });
-          
-          // Start simulated detection
-          startSimulatedDetection();
-        }
-      }, 200);
+      detectorRef.current.startCalibration();
+      addLog("Starting baseline calibration...");
+      
+      startRealDetection();
       
     } catch (error: any) {
       console.error("Camera error:", error);
@@ -147,52 +143,79 @@ const Detect = () => {
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
     setIsDemo(false);
     setIsDetecting(false);
     addLog("Detection stopped");
   };
 
   const recalibrate = () => {
-    setIsCalibrating(true);
-    setBaselineProgress(0);
-    addLog("Recalibration started");
-    
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += 10;
-      setBaselineProgress(progress);
-      
-      if (progress >= 100) {
-        clearInterval(interval);
-        setIsCalibrating(false);
-        addLog("Recalibration complete");
-        toast({
-          title: "Recalibration Complete",
-          description: "New baseline established",
-        });
+    if (detectorRef.current) {
+      setIsCalibrating(true);
+      setBaselineProgress(0);
+      detectorRef.current.startCalibration();
+      addLog("Recalibration started");
+    }
+  };
+
+  // Real detection using MediaPipe
+  const startRealDetection = () => {
+    const detect = () => {
+      if (!videoRef.current || !detectorRef.current || !isDetecting) {
+        return;
       }
-    }, 200);
+
+      const timestamp = performance.now();
+      const result = detectorRef.current.processFrame(videoRef.current, timestamp);
+
+      if (result) {
+        setEyeOpenness(result.eye);
+        setEyeState(result.state);
+        setClosedFor(result.closed_for);
+
+        // Update calibration progress
+        if (detectorRef.current.isCalibrationInProgress()) {
+          const progress = detectorRef.current.getCalibrationProgress();
+          setBaselineProgress(progress);
+          
+          if (progress >= 100) {
+            setIsCalibrating(false);
+            addLog("Baseline calibration complete");
+            toast({
+              title: "Calibration Complete",
+              description: "Real-time detection is now active",
+            });
+          }
+        }
+
+        // Trigger alarm
+        if (result.alarm && !isAlarmActive) {
+          triggerAlarm();
+        }
+      }
+
+      animationFrameRef.current = requestAnimationFrame(detect);
+    };
+
+    detect();
   };
 
   // Simulated detection for demo purposes
   const startSimulatedDetection = () => {
     setInterval(() => {
-      // Simulate eye openness fluctuation
       const random = Math.random();
       const newOpenness = 0.02 + (random * 0.05);
       setEyeOpenness(newOpenness);
       
-      // Simulate occasional closed states
       if (random < 0.15) {
         setEyeState("CLOSED");
         setClosedFor(prev => {
           const newValue = prev + 0.1;
-          
-          // Trigger alarm at 1.2 seconds
           if (newValue >= 1.2 && !isAlarmActive) {
             triggerAlarm();
           }
-          
           return newValue;
         });
       } else {
